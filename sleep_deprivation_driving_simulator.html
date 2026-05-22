@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sleep Deprivation Driving Simulator</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #3c4b50;
+      font-family: Arial, sans-serif;
+      color: white;
+    }
+
+    #ui {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      z-index: 10;
+      background: rgba(0,0,0,0.45);
+      padding: 16px;
+      border-radius: 14px;
+      width: 300px;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 1.5rem;
+    }
+
+    label {
+      display: block;
+      margin-top: 12px;
+      margin-bottom: 8px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+    }
+
+    #stats {
+      margin-top: 15px;
+      line-height: 1.8;
+    }
+
+    #gameCanvas {
+      display: block;
+      background: #4f666d;
+    }
+
+    .warning {
+      color: #ffb3b3;
+      font-weight: bold;
+    }
+
+    #instructions {
+      margin-top: 15px;
+      font-size: 0.95rem;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+
+<div id="ui">
+  <h1>Sleep Deprivation Driving Simulator</h1>
+
+  <label for="sleepSlider">Hours Slept Last Night</label>
+  <input type="range" id="sleepSlider" min="0" max="10" value="8">
+  <div><span id="sleepValue">8</span> Hours</div>
+
+  <div id="stats">
+    Distance Driven: <span id="distance">0</span> m<br>
+    Crashes: <span id="crashes">0</span><br>
+    Lane Deviations: <span id="deviations">0</span><br>
+    Speed: <span id="speed">60</span> mph
+  </div>
+
+  <div id="fatigueText">
+    Well-rested drivers maintain attention and lane control.
+  </div>
+
+  <div id="instructions">
+    Use ← and → arrow keys to steer.<br>
+    Avoid incoming obstacles and stay in your lane.
+  </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const slider = document.getElementById('sleepSlider');
+const sleepValue = document.getElementById('sleepValue');
+const fatigueText = document.getElementById('fatigueText');
+
+const distanceText = document.getElementById('distance');
+const crashesText = document.getElementById('crashes');
+const deviationsText = document.getElementById('deviations');
+const speedText = document.getElementById('speed');
+
+let roadX = canvas.width / 2;
+let roadWidth = 420;
+
+let player = {
+  x: canvas.width / 2,
+  y: canvas.height - 140,
+  width: 50,
+  height: 90,
+  speed: 7
+};
+
+let keys = {};
+let obstacles = [];
+
+let crashes = 0;
+let deviations = 0;
+let distance = 0;
+
+let frame = 0;
+let blurAmount = 0;
+let microsleep = false;
+
+window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keyup', e => keys[e.key] = false);
+
+slider.addEventListener('input', () => {
+  sleepValue.textContent = slider.value;
+  updateFatigueText();
+});
+
+function updateFatigueText() {
+  const hours = Number(slider.value);
+
+  if (hours >= 8) {
+    fatigueText.innerHTML = 'Well-rested drivers maintain attention and lane control.';
+  } else if (hours >= 6) {
+    fatigueText.innerHTML = 'Mild fatigue causes slower reactions and reduced awareness.';
+  } else if (hours >= 4) {
+    fatigueText.innerHTML = '<span class="warning">Severe fatigue increases drifting and delayed reactions.</span>';
+  } else {
+    fatigueText.innerHTML = '<span class="warning">Extreme sleep deprivation can impair driving similarly to alcohol intoxication.</span>';
+  }
+}
+
+updateFatigueText();
+
+function sleepPenalty() {
+  return Math.max(0, 8 - Number(slider.value));
+}
+
+function spawnObstacle() {
+  const lane = Math.random() * (roadWidth - 80) + (roadX - roadWidth/2 + 40);
+
+  obstacles.push({
+    x: lane,
+    y: -120,
+    width: 50,
+    height: 90,
+    speed: 6 + sleepPenalty() * 0.4
+  });
+}
+
+function drawRoad() {
+  ctx.fillStyle = '#2f2f2f';
+  ctx.fillRect(roadX - roadWidth/2, 0, roadWidth, canvas.height);
+
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 5;
+
+  for (let y = -40; y < canvas.height; y += 80) {
+    ctx.beginPath();
+    ctx.moveTo(canvas.width/2, y + (frame * 6 % 80));
+    ctx.lineTo(canvas.width/2, y + 40 + (frame * 6 % 80));
+    ctx.stroke();
+  }
+}
+
+function drawPlayer() {
+  ctx.fillStyle = '#89aeb8';
+  ctx.fillRect(player.x, player.y, player.width, player.height);
+
+  ctx.fillStyle = '#d9f0f5';
+  ctx.fillRect(player.x + 10, player.y + 10, 30, 20);
+}
+
+function drawObstacles() {
+  ctx.fillStyle = '#c55b5b';
+
+  obstacles.forEach(obs => {
+    ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+  });
+}
+
+function updatePlayer() {
+  const fatigue = sleepPenalty();
+
+  let steeringDelay = fatigue * 0.15;
+
+  if (Math.random() < fatigue * 0.0009) {
+    microsleep = true;
+
+    setTimeout(() => {
+      microsleep = false;
+    }, 700 + fatigue * 100);
+  }
+
+  if (!microsleep) {
+    if (keys['ArrowLeft']) {
+      player.x -= player.speed - steeringDelay;
+    }
+
+    if (keys['ArrowRight']) {
+      player.x += player.speed - steeringDelay;
+    }
+  }
+
+  // Lane drifting effect
+  if (fatigue > 2) {
+    player.x += Math.sin(frame * 0.03) * fatigue * 0.45;
+  }
+
+  const leftBoundary = roadX - roadWidth/2;
+  const rightBoundary = roadX + roadWidth/2 - player.width;
+
+  if (player.x < leftBoundary || player.x > rightBoundary) {
+    deviations++;
+    deviationsText.textContent = deviations;
+
+    player.x = Math.max(leftBoundary, Math.min(rightBoundary, player.x));
+  }
+}
+
+function updateObstacles() {
+  obstacles.forEach(obs => {
+    obs.y += obs.speed;
+
+    if (
+      player.x < obs.x + obs.width &&
+      player.x + player.width > obs.x &&
+      player.y < obs.y + obs.height &&
+      player.y + player.height > obs.y
+    ) {
+      crashes++;
+      crashesText.textContent = crashes;
+
+      obs.y = canvas.height + 100;
+    }
+  });
+
+  obstacles = obstacles.filter(obs => obs.y < canvas.height + 120);
+}
+
+function applyFatigueEffects() {
+  const fatigue = sleepPenalty();
+
+  blurAmount = fatigue * 0.5;
+
+  ctx.filter = `blur(${blurAmount}px)`;
+
+  // Tunnel vision effect
+  if (fatigue >= 5) {
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(0, 0, 120, canvas.height);
+    ctx.fillRect(canvas.width - 120, 0, 120, canvas.height);
+  }
+
+  // Microsleep blackout
+  if (microsleep) {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = 'white';
+    ctx.font = '40px Arial';
+    ctx.fillText('MICROSLEEP', canvas.width/2 - 120, canvas.height/2);
+  }
+}
+
+function updateStats() {
+  distance += 0.4;
+  distanceText.textContent = Math.floor(distance);
+
+  const mph = Math.floor(60 + sleepPenalty() * 3);
+  speedText.textContent = mph;
+}
+
+function gameLoop() {
+  frame++;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  applyFatigueEffects();
+
+  drawRoad();
+  updatePlayer();
+  updateObstacles();
+
+  drawPlayer();
+  drawObstacles();
+
+  ctx.filter = 'none';
+
+  updateStats();
+
+  if (frame % 90 === 0) {
+    spawnObstacle();
+  }
+
+  requestAnimationFrame(gameLoop);
+}
+
+spawnObstacle();
+gameLoop();
+</script>
+
+</body>
+</html>
